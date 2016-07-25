@@ -92,11 +92,6 @@ endif
 CFLAGS += -pedantic -Weverything -Wextra -Wno-unused-parameter -Wno-gnu
 CXXFLAGS += -pedantic -Weverything -Wextra -Wno-unused-parameter -Wno-gnu
 
-ifeq ($(ERTS_DIRTY_SCHEDULERS),true)
-	CFLAGS += -DERTS_DIRTY_SCHEDULERS
-	CXXFLAGS += -DERTS_DIRTY_SCHEDULERS
-endif
-
 ifdef DEBUG
 	CFLAGS += -DNIFSY_DEBUG
 	CXXFLAGS += -DNIFSY_DEBUG
@@ -215,4 +210,9 @@ ERTS_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s/erts
 ERTS_DIRTY_SCHEDULERS ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [try erlang:system_info(dirty_cpu_schedulers), true catch _:_ -> false end]).")
 ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, include)]).")
 ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, lib)]).")
+endif
+
+ifeq ($(ERTS_DIRTY_SCHEDULERS),true)
+	CFLAGS += -DERTS_DIRTY_SCHEDULERS
+	CXXFLAGS += -DERTS_DIRTY_SCHEDULERS
 endif
