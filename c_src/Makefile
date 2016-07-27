@@ -11,7 +11,7 @@ MIX_ENV ?= dev
 
 C_SRC_DIR ?= $(CURDIR)
 C_SRC_ENV ?= $(C_SRC_DIR)/env.mk
-C_SRC_OUTPUT ?= $(CURDIR)/../priv/$(MIX_ENV)/$(PROJECT)
+C_SRC_OUTPUT ?= $(CURDIR)/../priv/$(MIX_ENV)/$(PROJECT)_nif
 C_SRC_TYPE ?= shared
 
 # System type and C compiler/flags.

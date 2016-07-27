@@ -19,6 +19,7 @@
 #pragma clang diagnostic ignored "-Wreserved-id-macro"
 #pragma clang diagnostic ignored "-Wpadded"
 #include "erl_nif.h"
+#include "uv.h"
 #pragma clang diagnostic pop
 
 #ifndef timersub
@@ -45,9 +46,11 @@
 
 // #define	NIFSY_DEBUG		1
 #ifdef NIFSY_DEBUG
-	#define	DEBUG_LOG(...)	enif_fprintf(stderr, __VA_ARGS__)
+	#define TRACE_F(...)		enif_fprintf(stderr, __VA_ARGS__)
+	#define	DEBUG_LOG(string)	TRACE_F("%s\n", string)
 #else
-	#define DEBUG_LOG(...)	((void)(0))
+	#define TRACE_F(...)		((void)(0))
+	#define DEBUG_LOG(string)	((void)(0))
 #endif
 
 /*
@@ -58,10 +61,10 @@
 	static ERL_NIF_TERM	nifsy_ ##function## _ ##arity (ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 
 NIF_FUN(close,		1);
-NIF_FUN(open,		3);
-NIF_FUN(read,		2);
-NIF_FUN(read_line,	1);
-NIF_FUN(write,		2);
+NIF_FUN(open,		2);
+// NIF_FUN(read,		2);
+// NIF_FUN(read_line,	1);
+// NIF_FUN(write,		2);
 
 #undef NIF_FUN
 
@@ -69,10 +72,10 @@ NIF_FUN(write,		2);
 
 static ErlNifFunc	nifsy_nif_funcs[] = {
 	NIF_FUNC(close,		1),
-	NIF_FUNC(open,		3),
-	NIF_FUNC(read,		2),
-	NIF_FUNC(read_line,	1),
-	NIF_FUNC(write,		2),
+	NIF_FUNC(open,		2),
+	// NIF_FUNC(read,		2),
+	// NIF_FUNC(read_line,	1),
+	// NIF_FUNC(write,		2),
 };
 
 #undef NIF_FUNC
@@ -84,29 +87,50 @@ static ErlNifFunc	nifsy_nif_funcs[] = {
 /* Declare common atoms */
 #define ATOM(Id)	static ERL_NIF_TERM	ATOM_##Id
 	ATOM(append);
+	ATOM(cloexec);
 	ATOM(closed);
+	ATOM(creat);
 	ATOM(create);
 	ATOM(dsync);
 	ATOM(enomem);
 	ATOM(eof);
 	ATOM(error);
+	ATOM(evtonly);
+	ATOM(excl);
+	ATOM(exlock);
 	ATOM(exclusive);
 	ATOM(lock);
+	ATOM(nofollow);
+	ATOM(nonblock);
 	ATOM(ok);
+	ATOM(rdonly);
+	ATOM(rdwr);
 	ATOM(read);
+	ATOM(read_ahead);
+	ATOM(shlock);
+	ATOM(symlink);
 	ATOM(sync);
+	ATOM(trunc);
 	ATOM(truncate);
 	ATOM(write);
+	ATOM(wronly);
 #undef ATOM
 
-typedef struct nifsy_priv_data_0_s {
+typedef struct nifsy_context_0_s {
 	uint8_t			version;
-	char			padding[7];
-	ErlNifResourceType	*nifsy_resource;
-} nifsy_priv_data_0_t;
+	char			__padding_0[7];
+	ErlNifResourceType	*resource;
+	ErlNifMutex		*mutex;
+	ErlNifCond		*wakeup;
+	ErlNifTid		*tid;
+	ErlNifTid		__tid;
+	uv_loop_t		*loop;
+	bool			stop;
+	char			__padding_1[7];
+} nifsy_context_0_t;
 
-#define nifsy_priv_data_version	0
-#define nifsy_priv_data_t		nifsy_priv_data_0_t
+#define nifsy_context_version	0
+#define nifsy_context_t		nifsy_context_0_t
 
 static int	nifsy_nif_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info);
 static int	nifsy_nif_upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data, ERL_NIF_TERM load_info);

@@ -7,29 +7,65 @@
  * Macros
  */
 
-#define	RW_UNLOCK							\
-	do								\
-	{								\
-		if (handle->rwlock != 0) {				\
-			(void) enif_rwlock_rwunlock(handle->rwlock);	\
-		}							\
-	} while (0)
+// #define	RW_UNLOCK							\
+// 	do								\
+// 	{								\
+// 		if (handle->rwlock != 0) {				\
+// 			(void) enif_rwlock_rwunlock(handle->rwlock);	\
+// 		}							\
+// 	} while (0)
 
-#define	RW_LOCK								\
-	do								\
-	{								\
-		if (handle->rwlock != 0) {				\
-			(void) enif_rwlock_rwlock(handle->rwlock);	\
-		}							\
-	} while (0)
+// #define	RW_LOCK								\
+// 	do								\
+// 	{								\
+// 		if (handle->rwlock != 0) {				\
+// 			(void) enif_rwlock_rwlock(handle->rwlock);	\
+// 		}							\
+// 	} while (0)
 
-#define	RETURN_BADARG(code)						\
+// #define	RW_LOCK(HANDLE)							\
+// 	do								\
+// 	{								\
+// 		if (HANDLE->rwlock != NULL) {				\
+// 			(void) enif_rwlock_rwlock(HANDLE->rwlock);	\
+// 		}							\
+// 	} while (0)
+
+#define	HANDLE_BADARG_IF(CONDITIONAL, IF_ERROR)				\
 	do								\
 	{								\
-		if (!(code)) {						\
+		if ((CONDITIONAL)) {					\
+			(IF_ERROR);					\
 			return enif_make_badarg(env);			\
 		}							\
 	} while (0)
+
+#define	RETURN_BADARG_IF(CONDITIONAL)					\
+	HANDLE_BADARG_IF(CONDITIONAL, { ((void)(0)); })
+
+#define	HANDLE_UV_ERROR_IF(UV_REQUEST, IF_ERROR)			\
+	do								\
+	{								\
+		int retval;						\
+		if ((retval = (UV_REQUEST)) != 0) {			\
+			(IF_ERROR);					\
+			return enif_make_tuple2(env, ATOM_error,	\
+				enif_make_string(env,			\
+					uv_strerror(retval),		\
+					ERL_NIF_LATIN1));		\
+		}							\
+	} while (0)
+
+// #define RETURN_UV_ERROR_IF(UV_REQUEST)					\
+// 	HANDLE_UV_ERROR_IF(UV_REQUEST, { ((void)(0)); })
+
+// #define	RETURN_BADARG(code)						\
+// 	do								\
+// 	{								\
+// 		if (!(code)) {						\
+// 			return enif_make_badarg(env);			\
+// 		}							\
+// 	} while (0)
 
 // #define	RETURN_ERROR(code, error_atom)					\
 // 	do								\
@@ -40,447 +76,279 @@
 // 		}							\
 // 	} while (0)
 
-#define	HANDLE_ERROR(code, if_error, error_atom)			\
-	do								\
-	{								\
-		if (!(code)) {						\
-			(if_error);					\
-			return enif_make_tuple2(env, ATOM_error,	\
-						error_atom);		\
-		}							\
-	} while (0)
+// #define	HANDLE_ERROR(code, if_error, error_atom)			\
+// 	do								\
+// 	{								\
+// 		if (!(code)) {						\
+// 			(if_error);					\
+// 			return enif_make_tuple2(env, ATOM_error,	\
+// 						error_atom);		\
+// 		}							\
+// 	} while (0)
 
-#define	RETURN_ERROR_IF_NEG(code)					\
-	do								\
-	{								\
-		if ((code) < 0) {					\
-			return enif_make_tuple2(env, ATOM_error,	\
-				enif_make_tuple2(env,			\
-					enif_make_int(env, errno),	\
-					enif_make_string(env,		\
-						strerror(errno),	\
-						ERL_NIF_LATIN1)));	\
-		}							\
-	} while (0)
+// #define	RETURN_ERROR_IF_NEG(code)					\
+// 	do								\
+// 	{								\
+// 		if ((code) < 0) {					\
+// 			return enif_make_tuple2(env, ATOM_error,	\
+// 				enif_make_tuple2(env,			\
+// 					enif_make_int(env, errno),	\
+// 					enif_make_string(env,		\
+// 						strerror(errno),	\
+// 						ERL_NIF_LATIN1)));	\
+// 		}							\
+// 	} while (0)
 
-#define	HANDLE_ERROR_IF_NEG(code, if_error)				\
-	do								\
-	{								\
-		if ((code) < 0) {					\
-			(if_error);					\
-			return enif_make_tuple2(env, ATOM_error,	\
-				enif_make_tuple2(env,			\
-					enif_make_int(env, errno),	\
-					enif_make_string(env,		\
-						strerror(errno),	\
-						ERL_NIF_LATIN1)));	\
-		}							\
-	} while (0)
-
-#define NIFSY_HANDLE_ALLOC(env, handle)					\
-	do								\
-	{								\
-		nifsy_priv_data_t *priv_data;				\
-		priv_data = (nifsy_priv_data_t *)(enif_priv_data(env));	\
-		handle = (nifsy_handle_t *)(				\
-			enif_alloc_resource(				\
-				priv_data->nifsy_resource,		\
-				sizeof(nifsy_handle_t)));		\
-	} while (0)
+// #define	HANDLE_ERROR_IF_NEG(code, if_error)				\
+// 	do								\
+// 	{								\
+// 		if ((code) < 0) {					\
+// 			(if_error);					\
+// 			return enif_make_tuple2(env, ATOM_error,	\
+// 				enif_make_tuple2(env,			\
+// 					enif_make_int(env, errno),	\
+// 					enif_make_string(env,		\
+// 						strerror(errno),	\
+// 						ERL_NIF_LATIN1)));	\
+// 		}							\
+// 	} while (0)
 
 /*
  * Types
  */
 
 typedef struct nifsy_handle_s {
-	int		file_descriptor;
-	int		mode;
 	ErlNifRWLock	*rwlock;
 	ErlNifBinary	*buffer;
 	unsigned long	buffer_alloc;
 	unsigned long	buffer_offset;
 	unsigned long	buffer_size;
+	int		file_descriptor;
+	int		flags;
+	int		mode;
 	bool		closed;
-	char		padding[7];
+	char		__padding_0[3];
 } nifsy_handle_t;
+
+typedef struct nifsy_open_options_s {
+	unsigned long	read_ahead;
+	int		flags;
+	int		mode;
+	bool		lock;
+	char		__padding_0[7];
+} nifsy_open_options_t;
+
+typedef struct nifsy_call_s {
+	nifsy_context_t	*ctx;
+	ERL_NIF_TERM	tag;
+	ErlNifPid	pid;
+	nifsy_handle_t	*handle;
+	uv_fs_t		req;
+} nifsy_call_t;
 
 /*
  * Erlang NIF functions
  */
 
-static bool	decode_options(ErlNifEnv *env, ERL_NIF_TERM list, int *mode, bool *lock);
+/* Callback functions */
+static void	nifsy_close_1_callback(uv_fs_t *req);
+static void	nifsy_open_2_callback(uv_fs_t *req);
+
+/* Internal functions */
+static bool	nifsy_get_open_options(ErlNifEnv *env, ERL_NIF_TERM list, nifsy_open_options_t *options);
+
+// static bool	decode_options(ErlNifEnv *env, ERL_NIF_TERM list, int *mode, bool *lock);
 static int	nifsy_do_close(nifsy_handle_t *handle, bool from_dtor);
-static void	nifsy_dtor(ErlNifEnv *env, void *resource);
+static void	nifsy_resource_dtor(ErlNifEnv *env, void *resource);
 
 static ERL_NIF_TERM
 nifsy_close_1(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	nifsy_priv_data_t *priv_data = (nifsy_priv_data_t *)(enif_priv_data(env));
-	ErlNifResourceType *resource_type = priv_data->nifsy_resource;
+	nifsy_context_t *ctx = (nifsy_context_t *)(enif_priv_data(env));
 	nifsy_handle_t *handle = NULL;
+	nifsy_call_t *call = NULL;
 
-	RETURN_BADARG(!(argc != 1
-		|| !enif_get_resource(env, argv[0], resource_type, (void **)&handle)));
+	RETURN_BADARG_IF(argc != 1
+		|| !enif_get_resource(env, argv[0], ctx->resource, (void **)(&handle)));
 
-	RW_LOCK;
-	int ret = nifsy_do_close(handle, false);
-	RW_UNLOCK;
+	// RW_LOCK(handle);
 
-	RETURN_ERROR_IF_NEG(ret);
+	RETURN_BADARG_IF((call = (nifsy_call_t *)(enif_alloc(sizeof(nifsy_call_t)))) == NULL);
 
-	return ATOM_ok;
+	call->ctx = ctx;
+	call->tag = enif_make_ref(env);
+	(void) enif_self(env, &(call->pid));
+	call->handle = handle;
+	call->req.data = (void *)(call);
+
+	HANDLE_UV_ERROR_IF(uv_fs_close(ctx->loop, &(call->req),
+		handle->file_descriptor, nifsy_close_1_callback),
+		{
+			(void) enif_free((void *)(call));
+		});
+
+	(void) enif_cond_signal(ctx->wakeup);
+
+	// RW_UNLOCK(handle);
+
+	return enif_make_tuple2(env, ATOM_ok, call->tag);
 }
 
 static ERL_NIF_TERM
-nifsy_open_3(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	ErlNifBinary filename;
-	unsigned long buffer_alloc = 0;
-	int mode = 0;
-	bool lock = false;
-
-	RETURN_BADARG(!(argc != 3
-		|| !enif_inspect_iolist_as_binary(env, argv[0], &filename)
-		|| filename.size > PATH_MAX));
-
 	char path[PATH_MAX + 1];
-	(void) memcpy(path, filename.data, filename.size);
-	(void) memset(path + filename.size, 0, 1);
-
-	RETURN_BADARG(!(strnlen((const char *)(filename.data), filename.size) == 0
-		|| !enif_get_ulong(env, argv[1], &buffer_alloc)
-		|| !decode_options(env, argv[2], &mode, &lock)));
-
-	int file_descriptor = open(path, mode);
-
-	RETURN_ERROR_IF_NEG(file_descriptor);
-
+	nifsy_open_options_t options;
+	nifsy_context_t *ctx = (nifsy_context_t *)(enif_priv_data(env));
 	nifsy_handle_t *handle = NULL;
-	NIFSY_HANDLE_ALLOC(env, handle);
+	nifsy_call_t *call = NULL;
 
-	if (lock) {
-		handle->rwlock = enif_rwlock_create("nifsy");
-	} else {
-		handle->rwlock = 0;
-	}
+	RETURN_BADARG_IF(argc != 2
+		|| enif_get_string(env, argv[0], path, PATH_MAX, ERL_NIF_LATIN1) <= 0
+		|| !nifsy_get_open_options(env, argv[1], &options)
+		|| (handle = (nifsy_handle_t *)(enif_alloc_resource(ctx->resource, sizeof(nifsy_handle_t)))) == NULL);
 
-	handle->file_descriptor = file_descriptor;
-	handle->mode = mode;
+	TRACE_F("flags: %d\n", options.flags);
+
+	handle->flags = options.flags;
+	handle->mode = options.mode;
 	handle->closed = false;
-	HANDLE_ERROR(handle->buffer = enif_alloc(sizeof(ErlNifBinary)),
-		{
-			(void) enif_release_resource(handle);
-			RW_UNLOCK;
-		},
-		ATOM_enomem);
-	HANDLE_ERROR(enif_alloc_binary(buffer_alloc, handle->buffer),
-		{
-			(void) enif_release_resource(handle);
-			RW_UNLOCK;
-		},
-		ATOM_enomem);
-
-	handle->buffer_alloc = buffer_alloc;
+	handle->buffer_alloc = options.read_ahead;
 	handle->buffer_offset = 0;
 	handle->buffer_size = 0;
+	handle->rwlock = NULL;
 
-	ERL_NIF_TERM resource = enif_make_resource(env, handle);
-	(void) enif_release_resource(handle);
-
-	return enif_make_tuple2(env, ATOM_ok, resource);
-}
-
-static ERL_NIF_TERM
-nifsy_read_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
-{
-	nifsy_priv_data_t *priv_data = (nifsy_priv_data_t *)(enif_priv_data(env));
-	ErlNifResourceType *resource_type = priv_data->nifsy_resource;
-	nifsy_handle_t *handle = NULL;
-	unsigned long requested_bytes = 0;
-
-	RETURN_BADARG(!(argc != 2
-		|| !enif_get_resource(env, argv[0], resource_type, (void **)&handle)
-		|| !enif_get_ulong(env, argv[1], &requested_bytes)
-		|| handle->closed
-		|| (handle->mode & O_WRONLY)));
-
-	unsigned long buffer_alloc = handle->buffer_alloc;
-
-	RW_LOCK;
-
-	ErlNifBinary return_bytes;
-	HANDLE_ERROR(enif_alloc_binary(requested_bytes, &return_bytes),
-		{ RW_LOCK; }, ATOM_enomem);
-
-	unsigned long return_bytes_offset = 0;
-
-	if (handle->buffer && handle->buffer_offset != 0) {
-		DEBUG_LOG("a buffer exists");
-		unsigned char *rem_data = handle->buffer->data + handle->buffer_offset;
-		unsigned long rem_data_size = handle->buffer_size - handle->buffer_offset;
-
-		if (rem_data_size >= requested_bytes) {
-			DEBUG_LOG("b enough data");
-			(void) memcpy(return_bytes.data, rem_data, requested_bytes);
-			handle->buffer_offset += requested_bytes;
-
-			RW_UNLOCK;
-
-			return enif_make_tuple2(env, ATOM_ok,
-				enif_make_binary(env, &return_bytes));
-		} else {
-			DEBUG_LOG("c not enough data");
-			(void) memcpy(return_bytes.data, rem_data, rem_data_size);
-			return_bytes_offset = rem_data_size;
-			handle->buffer_offset = 0;
-		}
-	}
-
-	while (true) {
-		DEBUG_LOG("d loop start");
-		unsigned long nbytes_read;
-		HANDLE_ERROR_IF_NEG(
-			nbytes_read = (unsigned long)read(handle->file_descriptor,
-				handle->buffer->data, buffer_alloc),
+	if (options.lock) {
+		HANDLE_BADARG_IF((handle->rwlock = enif_rwlock_create("nifsy")) == NULL,
 			{
-				(void) enif_release_binary(&return_bytes);
-				RW_UNLOCK;
+				(void) enif_release_resource((void *)(handle));
 			});
-
-		handle->buffer_size = nbytes_read;
-
-		if (!nbytes_read) {
-			DEBUG_LOG("e no data");
-			if (return_bytes_offset) {
-				DEBUG_LOG("f return return_bytes");
-				HANDLE_ERROR(enif_realloc_binary(&return_bytes, return_bytes_offset),
-					{ RW_UNLOCK; }, ATOM_enomem);
-				RW_UNLOCK;
-				return enif_make_tuple2(env, ATOM_ok,
-					enif_make_binary(env, &return_bytes));
-			} else {
-				DEBUG_LOG("g eof");
-				(void) enif_release_binary(&return_bytes);
-				RW_UNLOCK;
-				return enif_make_tuple2(env, ATOM_ok, ATOM_eof);
-			}
-		}
-
-		unsigned long remaining_bytes = requested_bytes - return_bytes_offset;
-
-		if (nbytes_read >= remaining_bytes) {
-			DEBUG_LOG("h enough bytes");
-			(void) memcpy(return_bytes.data + return_bytes_offset, handle->buffer->data,
-				remaining_bytes);
-			handle->buffer_offset += remaining_bytes;
-
-			RW_UNLOCK;
-
-			return enif_make_tuple2(env, ATOM_ok,
-				enif_make_binary(env, &return_bytes));
-		} else {
-			DEBUG_LOG("i not enough bytes");
-			(void) memcpy(return_bytes.data + return_bytes_offset, handle->buffer->data,
-				nbytes_read);
-			return_bytes_offset += nbytes_read;
-			handle->buffer_offset = 0;
-		}
 	}
+
+	HANDLE_BADARG_IF((call = (nifsy_call_t *)(enif_alloc(sizeof(nifsy_call_t)))) == NULL,
+		{
+			(void) enif_release_resource((void *)(handle));
+		});
+
+	call->ctx = ctx;
+	call->tag = enif_make_ref(env);
+	(void) enif_self(env, &(call->pid));
+	call->handle = handle;
+	call->req.data = (void *)(call);
+
+	HANDLE_UV_ERROR_IF(uv_fs_open(ctx->loop, &(call->req),
+		path, handle->flags, handle->mode, nifsy_open_2_callback),
+		{
+			(void) enif_release_resource((void *)(handle));
+			(void) enif_free((void *)(call));
+		});
+
+	(void) enif_cond_signal(ctx->wakeup);
+
+	return enif_make_tuple2(env, ATOM_ok, call->tag);
 }
 
-static ERL_NIF_TERM
-nifsy_read_line_1(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+/*
+ * Callback functions
+ */
+
+static void
+nifsy_close_1_callback(uv_fs_t *req)
 {
-	nifsy_priv_data_t *priv_data = (nifsy_priv_data_t *)(enif_priv_data(env));
-	ErlNifResourceType *resource_type = priv_data->nifsy_resource;
-	nifsy_handle_t *handle = NULL;
+	nifsy_call_t *call = (nifsy_call_t *)(req->data);
+	nifsy_handle_t *handle = call->handle;
+	ErlNifEnv *env = NULL;
+	int retval;
+	ERL_NIF_TERM out;
 
-	RETURN_BADARG(!(argc != 1
-		|| !enif_get_resource(env, argv[0], resource_type, (void **)&handle)
-		|| handle->closed
-		|| (handle->mode & O_WRONLY)));
+	TRACE_F("close/1 result: %d\n", req->result);
 
-	unsigned long buffer_alloc = handle->buffer_alloc;
+	env = enif_alloc_env();
+	retval = (int)(req->result);
 
-	RW_LOCK;
-
-	ErlNifBinary new_line_buffer;
-	new_line_buffer.data = NULL;
-
-	if (handle->buffer && handle->buffer_offset != 0) {
-		DEBUG_LOG("a buffer exists");
-		unsigned char *newline,
-		*rem_data = handle->buffer->data + handle->buffer_offset;
-		unsigned long rem_data_size = handle->buffer_size - handle->buffer_offset;
-
-		if ((newline = memchr(rem_data, '\n', rem_data_size))) {
-			DEBUG_LOG("b newline found");
-			unsigned long line_size = (unsigned long)(newline - rem_data);
-
-			HANDLE_ERROR(enif_alloc_binary(line_size, &new_line_buffer),
-				{ RW_UNLOCK; }, ATOM_enomem);
-
-			(void) memcpy(new_line_buffer.data, rem_data, line_size);
-			ERL_NIF_TERM new_line_term = enif_make_binary(env, &new_line_buffer);
-			handle->buffer_offset = handle->buffer_offset + line_size + 1;
-
-			RW_UNLOCK;
-
-			return enif_make_tuple2(env, ATOM_ok, new_line_term);
-		} else {
-			DEBUG_LOG("c newline not found");
-			HANDLE_ERROR(enif_alloc_binary(rem_data_size, &new_line_buffer),
-				{ RW_UNLOCK; }, ATOM_enomem);
-
-			(void) memcpy(new_line_buffer.data, rem_data, rem_data_size);
-			handle->buffer_offset = 0;
-		}
-	}
-
-	while (true) {
-		DEBUG_LOG("e loop start");
-		unsigned long nbytes_read;
-		HANDLE_ERROR_IF_NEG(
-			nbytes_read = (unsigned long)read(handle->file_descriptor,
-			handle->buffer->data, buffer_alloc),
-			{
-				if (new_line_buffer.data) {
-					(void) enif_release_binary(&new_line_buffer);
-				}
-				RW_UNLOCK;
-			});
-
-		handle->buffer_size = nbytes_read;
-
-		if (!nbytes_read) {
-			DEBUG_LOG("f no bytes read");
-			if (new_line_buffer.data) {
-				DEBUG_LOG("g buffer existed");
-				RW_UNLOCK;
-				return enif_make_tuple2(env, ATOM_ok,
-					enif_make_binary(env, &new_line_buffer));
-			} else {
-				DEBUG_LOG("h eof");
-				RW_UNLOCK;
-				return enif_make_tuple2(env, ATOM_ok, ATOM_eof);
-			}
-		}
-
-		unsigned char *newline;
-		if ((newline = memchr(handle->buffer->data, '\n', handle->buffer_size))) {
-			DEBUG_LOG("j newline found in read");
-			unsigned long line_size = (unsigned long)(newline - handle->buffer->data);
-
-			if (new_line_buffer.data) {
-				DEBUG_LOG("k new line buffer existed");
-				unsigned long orig_size = new_line_buffer.size;
-
-				HANDLE_ERROR(enif_realloc_binary(&new_line_buffer,
-					new_line_buffer.size + line_size),
-					{ RW_UNLOCK; }, ATOM_enomem);
-
-				(void) memcpy(new_line_buffer.data + orig_size, handle->buffer->data,
-					line_size);
-				ERL_NIF_TERM new_line_term = enif_make_binary(env, &new_line_buffer);
-				handle->buffer_offset = handle->buffer_offset + line_size + 1;
-				RW_UNLOCK;
-
-				return enif_make_tuple2(env, ATOM_ok, new_line_term);
-			} else {
-				DEBUG_LOG("l new line buffer create");
-				HANDLE_ERROR(enif_alloc_binary(line_size, &new_line_buffer),
-					{ RW_UNLOCK; }, ATOM_enomem);
-
-				(void) memcpy(new_line_buffer.data, handle->buffer->data, line_size);
-				ERL_NIF_TERM new_line_term = enif_make_binary(env, &new_line_buffer);
-				handle->buffer_offset = handle->buffer_offset + line_size + 1;
-				RW_UNLOCK;
-
-				return enif_make_tuple2(env, ATOM_ok, new_line_term);
-			}
-		} else {
-			DEBUG_LOG("m newline not found");
-			if (new_line_buffer.data) {
-				DEBUG_LOG("n new line buffer exists");
-				unsigned long orig_size = new_line_buffer.size;
-
-				HANDLE_ERROR(
-					enif_realloc_binary(&new_line_buffer,
-					new_line_buffer.size + handle->buffer_size),
-					{ RW_UNLOCK; }, ATOM_enomem);
-
-				(void) memcpy(new_line_buffer.data + orig_size, handle->buffer->data,
-					handle->buffer_size);
-				handle->buffer_offset = 0;
-			} else {
-				DEBUG_LOG("o new line buffer not found");
-				HANDLE_ERROR(enif_alloc_binary(handle->buffer_size, &new_line_buffer),
-					{ RW_UNLOCK; }, ATOM_enomem);
-
-				(void) memcpy(new_line_buffer.data, handle->buffer->data, handle->buffer_size);
-				handle->buffer_offset = 0;
-			}
-		}
-	}
-}
-
-static ERL_NIF_TERM
-nifsy_write_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
-{
-	nifsy_priv_data_t *priv_data = (nifsy_priv_data_t *)(enif_priv_data(env));
-	ErlNifResourceType *resource_type = priv_data->nifsy_resource;
-	nifsy_handle_t *handle = NULL;
-	ErlNifBinary write_binary;
-
-	RETURN_BADARG(!(argc != 2
-		|| !enif_get_resource(env, argv[0], resource_type, (void **)&handle)
-		|| handle->closed
-		|| !(handle->mode & O_WRONLY)
-		|| !enif_inspect_iolist_as_binary(env, argv[1], &write_binary)));
-
-	RW_LOCK;
-
-	unsigned long remaining_buffer_bytes =
-		handle->buffer->size - handle->buffer_offset;
-
-	if (remaining_buffer_bytes > write_binary.size) {
-		(void) memcpy(handle->buffer->data + handle->buffer_offset,
-			write_binary.data, write_binary.size);
-		handle->buffer_offset += write_binary.size;
+	if (retval < 0) {
+		handle->file_descriptor = retval;
+		handle->buffer = NULL;
+		out = enif_make_tuple2(env, ATOM_error,
+			enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1));
 	} else {
-		unsigned long write_binary_offset = 0;
-		unsigned long write_binary_remaining = write_binary.size;
-
-		while (write_binary_remaining) {
-			(void) memcpy(handle->buffer->data + handle->buffer_offset,
-				write_binary.data + write_binary_offset,
-				remaining_buffer_bytes);
-
-			HANDLE_ERROR_IF_NEG(
-				write(handle->file_descriptor,
-					handle->buffer->data,
-					handle->buffer->size),
-				{ RW_UNLOCK; });
-
-			write_binary_remaining -= remaining_buffer_bytes;
-			write_binary_offset += remaining_buffer_bytes;
-
-			if (write_binary_remaining < handle->buffer->size) {
-				(void) memcpy(handle->buffer->data,
-					write_binary.data + write_binary_offset,
-					write_binary_remaining);
-				handle->buffer_offset = write_binary_remaining;
-				write_binary_remaining = 0;
-			} else {
-				handle->buffer_offset = 0;
-				remaining_buffer_bytes = handle->buffer->size;
-			}
-		}
+		out = enif_make_tuple2(env, ATOM_ok,
+			enif_make_ulong(env, (unsigned long)(req->result)));
 	}
 
-	RW_UNLOCK;
+	(void) enif_send(NULL, &(call->pid), env, enif_make_tuple2(env, call->tag, out));
 
-	return ATOM_ok;
+	(void) enif_free_env(env);
+	(void) uv_fs_req_cleanup(req);
+	(void) enif_free((void *)(call));
+
+	return;
+}
+
+static void
+nifsy_open_2_callback(uv_fs_t *req)
+{
+	nifsy_call_t *call = (nifsy_call_t *)(req->data);
+	nifsy_handle_t *handle = call->handle;
+	ErlNifEnv *env = NULL;
+	int retval;
+	ERL_NIF_TERM out;
+
+	TRACE_F("open/2 result: %d\n", req->result);
+
+	if (handle->flags & O_APPEND)
+		TRACE_F("\tO_APPEND\n");
+	if (handle->flags & O_CLOEXEC)
+		TRACE_F("\tO_CLOEXEC\n");
+	if (handle->flags & O_CREAT)
+		TRACE_F("\tO_CREAT\n");
+	if (handle->flags & O_EVTONLY)
+		TRACE_F("\tO_EVTONLY\n");
+	if (handle->flags & O_EXCL)
+		TRACE_F("\tO_EXCL\n");
+	if (handle->flags & O_EXLOCK)
+		TRACE_F("\tO_EXLOCK\n");
+	if (handle->flags & O_NOFOLLOW)
+		TRACE_F("\tO_NOFOLLOW\n");
+	if (handle->flags & O_NONBLOCK)
+		TRACE_F("\tO_NONBLOCK\n");
+	if (handle->flags & O_RDONLY)
+		TRACE_F("\tO_RDONLY\n");
+	if (handle->flags & O_RDWR)
+		TRACE_F("\tO_RDWR\n");
+	if (handle->flags & O_SHLOCK)
+		TRACE_F("\tO_SHLOCK\n");
+	if (handle->flags & O_SYMLINK)
+		TRACE_F("\tO_SYMLINK\n");
+	if (handle->flags & O_TRUNC)
+		TRACE_F("\tO_TRUNC\n");
+	if (handle->flags & O_WRONLY)
+		TRACE_F("\tO_WRONLY\n");
+
+	env = enif_alloc_env();
+	retval = (int)(req->result);
+
+	if (retval < 0) {
+		handle->file_descriptor = retval;
+		handle->buffer = NULL;
+		out = enif_make_tuple2(env, ATOM_error,
+			enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1));
+	} else {
+		handle->file_descriptor = retval;
+		handle->buffer = enif_alloc(sizeof(ErlNifBinary));
+		(void) enif_alloc_binary(handle->buffer_alloc, handle->buffer);
+		out = enif_make_tuple2(env, ATOM_ok,
+			enif_make_resource(env, handle));
+	}
+
+	enif_send(NULL, &(call->pid), env, enif_make_tuple2(env, call->tag, out));
+
+	(void) enif_release_resource((void *)(handle));
+	(void) enif_free_env(env);
+	(void) uv_fs_req_cleanup(req);
+	(void) enif_free((void *)(call));
+
+	return;
 }
 
 /*
@@ -488,38 +356,107 @@ nifsy_write_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
  */
 
 static bool
-decode_options(ErlNifEnv *env, ERL_NIF_TERM list, int *mode, bool *lock)
+nifsy_get_open_options(ErlNifEnv *env, ERL_NIF_TERM list, nifsy_open_options_t *options)
 {
-	int m = 0;
-	bool l = false;
 	ERL_NIF_TERM head;
+	int arity = 0;
+	const ERL_NIF_TERM *elements = NULL;
+	unsigned long value = 0;
+
+	if (!enif_is_list(env, list)) {
+		return false;
+	}
+
+	options->flags = 0;
+	options->mode = 0;
+	options->lock = false;
+	options->read_ahead = 0;
 
 	while (enif_get_list_cell(env, list, &head, &list)) {
-		if (enif_is_identical(head, ATOM_read)) {
-			m |= O_RDONLY;
-		} else if (enif_is_identical(head, ATOM_write)) {
-			m |= O_WRONLY;
+		if (enif_is_identical(head, ATOM_read_ahead)) {
+			options->read_ahead = 0x4000000UL;
+#ifdef O_APPEND
 		} else if (enif_is_identical(head, ATOM_append)) {
-			m |= O_APPEND;
-		} else if (enif_is_identical(head, ATOM_create)) {
-			m |= O_CREAT;
-		} else if (enif_is_identical(head, ATOM_exclusive)) {
-			m |= O_EXCL;
-		} else if (enif_is_identical(head, ATOM_truncate)) {
-			m |= O_TRUNC;
-		} else if (enif_is_identical(head, ATOM_sync)) {
-			m |= O_SYNC;
-		} else if (enif_is_identical(head, ATOM_dsync)) {
-			m |= O_DSYNC;
-		} else if (enif_is_identical(head, ATOM_lock)) {
-			l = true;
+			options->flags |= O_APPEND;
+#endif
+#ifdef O_CLOEXEC
+		} else if (enif_is_identical(head, ATOM_cloexec)) {
+			options->flags |= O_CLOEXEC;
+#endif
+#ifdef O_CREAT
+		} else if (enif_is_identical(head, ATOM_creat)) {
+			options->flags |= O_CREAT;
+#endif
+#ifdef O_EVTONLY
+		} else if (enif_is_identical(head, ATOM_evtonly)) {
+			options->flags |= O_EVTONLY;
+#endif
+#ifdef O_EXCL
+		} else if (enif_is_identical(head, ATOM_excl)) {
+			options->flags |= O_EXCL;
+#endif
+#ifdef O_EXLOCK
+		} else if (enif_is_identical(head, ATOM_exlock)) {
+			options->flags |= O_EXLOCK;
+#endif
+#ifdef O_NOFOLLOW
+		} else if (enif_is_identical(head, ATOM_nofollow)) {
+			options->flags |= O_NOFOLLOW;
+#endif
+#ifdef O_NONBLOCK
+		} else if (enif_is_identical(head, ATOM_nonblock)) {
+			options->flags |= O_NONBLOCK;
+#endif
+#ifdef O_RDONLY
+		} else if (enif_is_identical(head, ATOM_rdonly)) {
+			options->flags |= O_RDONLY;
+#endif
+#ifdef O_RDWR
+		} else if (enif_is_identical(head, ATOM_rdwr)) {
+			options->flags |= O_RDWR;
+#endif
+#ifdef O_SHLOCK
+		} else if (enif_is_identical(head, ATOM_shlock)) {
+			options->flags |= O_SHLOCK;
+#endif
+#ifdef O_SYMLINK
+		} else if (enif_is_identical(head, ATOM_symlink)) {
+			options->flags |= O_SYMLINK;
+#endif
+#ifdef O_TRUNC
+		} else if (enif_is_identical(head, ATOM_trunc)) {
+			options->flags |= O_TRUNC;
+#endif
+#ifdef O_WRONLY
+		} else if (enif_is_identical(head, ATOM_wronly)) {
+			options->flags |= O_WRONLY;
+#endif
+		} else if (enif_get_tuple(env, head, &arity, &elements) && arity == 2 && enif_is_atom(env, elements[0])) {
+			if (enif_is_identical(elements[0], ATOM_read_ahead) && enif_get_ulong(env, elements[1], &value)) {
+				options->read_ahead = value;
+			} else {
+				return false;
+			}
 		} else {
 			return false;
 		}
 	}
 
-	*mode = m;
-	*lock = l;
+	// macOS oflag documentation
+	// O_RDONLY        open for reading only
+	// O_WRONLY        open for writing only
+	// O_RDWR          open for reading and writing
+	// O_NONBLOCK      do not block on open or for data to become available
+	// O_APPEND        append on each write
+	// O_CREAT         create file if it does not exist
+	// O_TRUNC         truncate size to 0
+	// O_EXCL          error if O_CREAT and the file exists
+	// O_SHLOCK        atomically obtain a shared lock
+	// O_EXLOCK        atomically obtain an exclusive lock
+	// O_NOFOLLOW      do not follow symlinks
+	// O_SYMLINK       allow open of symlinks
+	// O_EVTONLY       descriptor requested for event notifications only
+	// O_CLOEXEC       mark as close-on-exec
 
 	return true;
 }
@@ -528,7 +465,10 @@ static int
 nifsy_do_close(nifsy_handle_t *handle, bool from_dtor)
 {
 	if (from_dtor) {
-		int result = close(handle->file_descriptor);
+		int result = 0;
+		if (handle->file_descriptor >= 0) {
+			result = close(handle->file_descriptor);
+		}
 		if (handle->buffer) {
 			(void) enif_release_binary(handle->buffer);
 			handle->buffer = NULL;
@@ -542,12 +482,16 @@ nifsy_do_close(nifsy_handle_t *handle, bool from_dtor)
 }
 
 static void
-nifsy_dtor(ErlNifEnv *env, void *resource)
+nifsy_resource_dtor(ErlNifEnv *env, void *resource)
 {
+	TRACE_F("destroying\n");
 	nifsy_handle_t *handle = (nifsy_handle_t *)(resource);
-	(void) nifsy_do_close(handle, true);
-	if (handle->rwlock != 0) {
-		enif_rwlock_destroy(handle->rwlock);
+	if (handle) {
+		(void) nifsy_do_close(handle, true);
+		if (handle->rwlock != NULL) {
+			(void) enif_rwlock_destroy(handle->rwlock);
+			handle->rwlock = NULL;
+		}
 	}
 }
 
@@ -555,41 +499,119 @@ nifsy_dtor(ErlNifEnv *env, void *resource)
  * Erlang NIF callbacks
  */
 
+static void *
+nifsy_nif_loop(void *priv_data)
+{
+	nifsy_context_t *ctx = (nifsy_context_t *)(priv_data);
+	int retval = 0;
+
+	for (;;) {
+		retval = uv_run(ctx->loop, UV_RUN_DEFAULT);
+		(void) enif_cond_wait(ctx->wakeup, ctx->mutex);
+		if (ctx->stop) {
+			TRACE_F("Loop: %d\n", retval);
+			break;
+		}
+	}
+
+	return NULL;
+}
+
 static int
 nifsy_nif_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)
 {
+	nifsy_context_t *ctx = NULL;
+	ErlNifResourceFlags resource_flags = (ErlNifResourceFlags)(0);
+	int retval = 0;
+
 	/* Allocate private data */
-	nifsy_priv_data_t *data = enif_alloc(sizeof(nifsy_priv_data_t));
-	if (data == NULL) {
+	ctx = (nifsy_context_t *)(enif_alloc(sizeof(nifsy_context_t)));
+
+	if (ctx == NULL) {
 		return 1;
 	}
 
 	/* Initialize common atoms */
 	#define ATOM(Id, Value) { ATOM_##Id = enif_make_atom(env, Value); }
 		ATOM(append,		"append");
+		ATOM(cloexec,		"cloexec");
 		ATOM(closed,		"closed");
+		ATOM(creat,		"creat");
 		ATOM(create,		"create");
 		ATOM(dsync,		"dsync");
 		ATOM(enomem,		"enomem");
 		ATOM(eof,		"eof");
 		ATOM(error,		"error");
+		ATOM(evtonly,		"evtonly");
+		ATOM(excl,		"excl");
 		ATOM(exclusive,		"exclusive");
+		ATOM(exlock,		"exlock");
 		ATOM(lock,		"lock");
+		ATOM(nofollow,		"nofollow");
+		ATOM(nonblock,		"nonblock");
 		ATOM(ok,		"ok");
+		ATOM(rdonly,		"rdonly");
+		ATOM(rdwr,		"rdwr");
 		ATOM(read,		"read");
+		ATOM(read_ahead,	"read_ahead");
+		ATOM(shlock,		"shlock");
+		ATOM(symlink,		"symlink");
 		ATOM(sync,		"sync");
+		ATOM(trunc,		"trunc");
 		ATOM(truncate,		"truncate");
 		ATOM(write,		"write");
+		ATOM(wronly,		"wronly");
 	#undef ATOM
 
-	ErlNifResourceFlags flags =
-		(ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
+	/* Initialize context */
+	ctx->version = nifsy_context_version;
+	ctx->resource = NULL;
+	ctx->mutex = NULL;
+	ctx->wakeup = NULL;
+	ctx->tid = NULL;
+	ctx->loop = uv_default_loop();
+	ctx->stop = false;
 
-	data->version = nifsy_priv_data_version;
-	data->nifsy_resource = enif_open_resource_type(env, NULL,
-		"nifsy_resource", &nifsy_dtor, flags, NULL);
+	resource_flags = (ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
 
-	*priv_data = (void *)(data);
+	/* Create context resource */
+	ctx->resource = enif_open_resource_type(env, NULL, "nifsy_resource",
+		&nifsy_resource_dtor, resource_flags, NULL);
+
+	if (ctx->resource == NULL) {
+		(void) nifsy_nif_unload(env, (void *)(ctx));
+		return 1;
+	}
+
+	/* Create context mutex */
+	ctx->mutex = enif_mutex_create("nifsy_mutex");
+
+	if (ctx->mutex == NULL) {
+		(void) nifsy_nif_unload(env, (void *)(ctx));
+		return 1;
+	}
+
+	/* Create context wakeup */
+	ctx->wakeup = enif_cond_create("nifsy_wakeup");
+
+	if (ctx->wakeup == NULL) {
+		(void) nifsy_nif_unload(env, (void *)(ctx));
+		return 1;
+	}
+
+	/* Create context thread */
+	ctx->tid = &(ctx->__tid);
+	retval = enif_thread_create("nifsy_loop", ctx->tid, &nifsy_nif_loop, (void *)(ctx), NULL);
+
+	if (retval != 0) {
+		ctx->tid = NULL;
+		(void) nifsy_nif_unload(env, (void *)(ctx));
+		return retval;
+	}
+
+	*priv_data = (void *)(ctx);
+
+	// TRACE_F("loaded\n");
 
 	return 0;
 }
@@ -603,8 +625,30 @@ nifsy_nif_upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data, ERL_NI
 static void
 nifsy_nif_unload(ErlNifEnv *env, void *priv_data)
 {
-	(void) enif_free(priv_data);
+	TRACE_F("unload nif\n");
+
+	nifsy_context_t *ctx = (nifsy_context_t *)(priv_data);
+
+	if (ctx != NULL) {
+		ctx->stop = true;
+		if (ctx->tid != NULL) {
+			(void) uv_stop(ctx->loop);
+			(void) enif_cond_signal(ctx->wakeup);
+			(void) enif_thread_join(ctx->__tid, NULL);
+			ctx->tid = NULL;
+		}
+		if (ctx->wakeup != NULL) {
+			(void) enif_cond_destroy(ctx->wakeup);
+			ctx->wakeup = NULL;
+		}
+		if (ctx->mutex != NULL) {
+			(void) enif_mutex_destroy(ctx->mutex);
+			ctx->mutex = NULL;
+		}
+		(void) enif_free((void *)(ctx));
+	}
+
 	return;
 }
 
-ERL_NIF_INIT(Elixir.Nifsy, nifsy_nif_funcs, nifsy_nif_load, NULL, nifsy_nif_upgrade, nifsy_nif_unload)
+ERL_NIF_INIT(nifsy_nif, nifsy_nif_funcs, nifsy_nif_load, NULL, nifsy_nif_upgrade, nifsy_nif_unload)
