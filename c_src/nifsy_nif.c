@@ -43,6 +43,16 @@
 #define	RETURN_BADARG_IF(CONDITIONAL)					\
 	HANDLE_BADARG_IF(CONDITIONAL, { ((void)(0)); })
 
+#define	HANDLE_ERROR_IF(REQUEST, IF_ERROR, ERROR_ATOM)			\
+	do								\
+	{								\
+		if ((REQUEST)) {					\
+			(IF_ERROR);					\
+			return enif_make_tuple2(env, ATOM_error,	\
+				ERROR_ATOM);				\
+		}							\
+	} while (0)
+
 #define	HANDLE_UV_ERROR_IF(UV_REQUEST, IF_ERROR)			\
 	do								\
 	{								\
@@ -123,6 +133,7 @@ typedef struct nifsy_handle_s {
 	unsigned long	buffer_alloc;
 	unsigned long	buffer_offset;
 	unsigned long	buffer_size;
+	unsigned long	read_offset;
 	int		file_descriptor;
 	int		flags;
 	int		mode;
@@ -144,7 +155,14 @@ typedef struct nifsy_call_s {
 	ErlNifPid	pid;
 	nifsy_handle_t	*handle;
 	uv_fs_t		req;
+	void		*data;
 } nifsy_call_t;
+
+typedef struct nifsy_read_s {
+	ErlNifBinary	out;
+	unsigned long	obytes;
+	unsigned long	rbytes;
+} nifsy_read_t;
 
 /*
  * Erlang NIF functions
@@ -153,6 +171,7 @@ typedef struct nifsy_call_s {
 /* Callback functions */
 static void	nifsy_close_1_callback(uv_fs_t *req);
 static void	nifsy_open_2_callback(uv_fs_t *req);
+static void	nifsy_read_2_callback(uv_fs_t *req);
 
 /* Internal functions */
 static bool	nifsy_get_open_options(ErlNifEnv *env, ERL_NIF_TERM list, nifsy_open_options_t *options);
@@ -180,6 +199,7 @@ nifsy_close_1(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	(void) enif_self(env, &(call->pid));
 	call->handle = handle;
 	call->req.data = (void *)(call);
+	call->data = NULL;
 
 	HANDLE_UV_ERROR_IF(uv_fs_close(ctx->loop, &(call->req),
 		handle->file_descriptor, nifsy_close_1_callback),
@@ -216,6 +236,7 @@ nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	handle->buffer_alloc = options.read_ahead;
 	handle->buffer_offset = 0;
 	handle->buffer_size = 0;
+	handle->read_offset = 0;
 	handle->rwlock = NULL;
 
 	if (options.lock) {
@@ -235,6 +256,7 @@ nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	(void) enif_self(env, &(call->pid));
 	call->handle = handle;
 	call->req.data = (void *)(call);
+	call->data = NULL;
 
 	HANDLE_UV_ERROR_IF(uv_fs_open(ctx->loop, &(call->req),
 		path, handle->flags, handle->mode, nifsy_open_2_callback),
@@ -244,6 +266,84 @@ nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		});
 
 	(void) enif_cond_signal(ctx->wakeup);
+
+	return enif_make_tuple2(env, ATOM_ok, call->tag);
+}
+
+static ERL_NIF_TERM
+nifsy_read_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	nifsy_context_t *ctx = (nifsy_context_t *)(enif_priv_data(env));
+	nifsy_handle_t *handle = NULL;
+	nifsy_read_t read_ctx;
+	void *p = NULL;
+	nifsy_call_t *call = NULL;
+	uv_buf_t iov;
+
+	read_ctx.obytes = 0;
+	read_ctx.rbytes = 0;
+
+	RETURN_BADARG_IF(argc != 2
+		|| !enif_get_resource(env, argv[0], ctx->resource, (void **)(&handle))
+		|| handle->closed
+		|| !enif_get_ulong(env, argv[1], &(read_ctx.rbytes)));
+
+	// RW_LOCK(handle);
+
+	if (handle->buffer != NULL
+			&& handle->buffer_offset != 0
+			&& handle->buffer_size > handle->buffer_offset
+			&& (handle->buffer_size - handle->buffer_offset) >= read_ctx.rbytes) {
+		TRACE_F("[A] buffer exists, enough data\n");
+		ERL_NIF_TERM out;
+		unsigned char *buf = enif_make_new_binary(env, read_ctx.rbytes, &out);
+		(void) memcpy(buf, handle->buffer->data + handle->buffer_offset, read_ctx.rbytes);
+		handle->buffer_offset += read_ctx.rbytes;
+		return enif_make_tuple2(env, ATOM_ok, out);
+	}
+
+	HANDLE_ERROR_IF((p = enif_alloc(sizeof(nifsy_call_t) + sizeof(nifsy_read_t))) == NULL,
+		{
+			TRACE_F("p is NULL (trying to alloc %llu bytes)\n", sizeof(nifsy_call_t) + sizeof(nifsy_read_t));
+			// RW_UNLOCK(handle);
+		}, ATOM_enomem);
+
+	HANDLE_ERROR_IF(!enif_alloc_binary(read_ctx.rbytes, &(read_ctx.out)),
+		{
+			TRACE_F("can't alloc %llu bytes\n", read_ctx.rbytes);
+			(void) enif_free(p);
+			// RW_UNLOCK(handle);
+		}, ATOM_enomem);
+
+	call = (nifsy_call_t *)(p);
+	call->ctx = ctx;
+	call->tag = enif_make_ref(env);
+	(void) enif_self(env, &(call->pid));
+	call->handle = handle;
+	call->req.data = (void *)(call);
+	call->data = (void *)((uint8_t *)(p) + sizeof(nifsy_call_t));
+
+	if (handle->buffer && handle->buffer_offset != 0 && handle->buffer_size > handle->buffer_offset) {
+		TRACE_F("[B] buffer exists, not enough data\n");
+		(void) memcpy(read_ctx.out.data, handle->buffer->data + handle->buffer_offset, handle->buffer_size - handle->buffer_offset);
+		read_ctx.obytes = handle->buffer_size - handle->buffer_offset;
+		handle->buffer_offset = 0;
+	}
+
+	(void) memcpy(call->data, (void *)(&read_ctx), sizeof(nifsy_read_t));
+
+	iov = uv_buf_init((char *)(handle->buffer->data), (unsigned int)(handle->buffer->size));
+
+	HANDLE_UV_ERROR_IF(uv_fs_read(ctx->loop, &(call->req),
+		handle->file_descriptor, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback),
+		{
+			(void) enif_release_binary(&(read_ctx.out));
+			(void) enif_free(p);
+		});
+
+	(void) enif_cond_signal(ctx->wakeup);
+
+	// RW_UNLOCK(handle);
 
 	return enif_make_tuple2(env, ATOM_ok, call->tag);
 }
@@ -347,6 +447,98 @@ nifsy_open_2_callback(uv_fs_t *req)
 	(void) enif_free_env(env);
 	(void) uv_fs_req_cleanup(req);
 	(void) enif_free((void *)(call));
+
+	return;
+}
+
+static void
+nifsy_read_2_callback(uv_fs_t *req)
+{
+	nifsy_call_t *call = (nifsy_call_t *)(req->data);
+	nifsy_handle_t *handle = call->handle;
+	nifsy_read_t *read_ctx = (nifsy_read_t *)(call->data);
+	ErlNifEnv *env = NULL;
+	int retval;
+	ERL_NIF_TERM out;
+	uv_buf_t iov;
+
+	TRACE_F("read/2 result: %d\n", req->result);
+
+	retval = (int)(req->result);
+
+	if (retval < 0) {
+		handle->buffer_offset = 0;
+		handle->buffer_size = 0;
+		handle->read_offset -= read_ctx->obytes;
+
+		env = enif_alloc_env();
+		out = enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1);
+		out = enif_make_tuple2(env, enif_make_atom(env, uv_err_name(retval)), out);
+		out = enif_make_tuple2(env, ATOM_error, out);
+		out = enif_make_tuple2(env, call->tag, out);
+		(void) enif_send(NULL, &(call->pid), env, out);
+
+		(void) enif_free_env(env);
+		(void) uv_fs_req_cleanup(req);
+		(void) enif_free((void *)(call));
+
+		return;
+	}
+
+	if (req->result == 0) {
+		handle->buffer_offset = 0;
+		handle->buffer_size = 0;
+
+		env = enif_alloc_env();
+
+		if (read_ctx->obytes == 0) {
+			out = ATOM_eof;
+		} else {
+			out = enif_make_binary(env, &(read_ctx->out));
+			out = enif_make_sub_binary(env, out, 0, read_ctx->obytes);
+			out = enif_make_tuple2(env, ATOM_ok, out);
+		}
+
+		out = enif_make_tuple2(env, call->tag, out);
+		(void) enif_send(NULL, &(call->pid), env, out);
+
+		(void) enif_free_env(env);
+		(void) uv_fs_req_cleanup(req);
+		(void) enif_free((void *)(call));
+
+		return;
+	}
+
+	if ((read_ctx->obytes + req->result) >= read_ctx->rbytes) {
+		handle->buffer_offset = read_ctx->rbytes - read_ctx->obytes;
+		handle->buffer_size = req->result;
+		handle->read_offset += req->result;
+		(void) memcpy(read_ctx->out.data + read_ctx->obytes, handle->buffer->data, handle->buffer_offset);
+		read_ctx->obytes += handle->buffer_offset;
+
+		env = enif_alloc_env();
+		out = enif_make_binary(env, &(read_ctx->out));
+		out = enif_make_tuple2(env, ATOM_ok, out);
+		out = enif_make_tuple2(env, call->tag, out);
+		(void) enif_send(NULL, &(call->pid), env, out);
+
+		(void) enif_free_env(env);
+		(void) uv_fs_req_cleanup(req);
+		(void) enif_free((void *)(call));
+
+		return;
+	}
+
+	(void) memcpy(read_ctx->out.data + read_ctx->obytes, handle->buffer->data, req->result);
+	handle->buffer_offset = 0;
+	handle->buffer_size = req->result;
+	handle->read_offset += req->result;
+	read_ctx->obytes += req->result;
+
+	iov = uv_buf_init((char *)(handle->buffer->data), (unsigned int)(handle->buffer->size));
+	(void) uv_fs_req_cleanup(req);
+	// TODO: handle errors on read
+	(void) uv_fs_read(call->ctx->loop, &(call->req), handle->file_descriptor, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback);
 
 	return;
 }

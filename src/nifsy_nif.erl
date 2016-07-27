@@ -5,6 +5,7 @@
 %% API
 -export([close/1]).
 -export([open/2]).
+-export([read/2]).
 
 -on_load(init/0).
 
@@ -12,10 +13,13 @@
 %%% API functions
 %%%===================================================================
 
-close(_File) ->
+close(_IoDevice) ->
 	erlang:nif_error({nif_not_loaded, ?MODULE}).
 
 open(_Path, _Options) ->
+	erlang:nif_error({nif_not_loaded, ?MODULE}).
+
+read(_IoDevice, _Bytes) ->
 	erlang:nif_error({nif_not_loaded, ?MODULE}).
 
 %%%-------------------------------------------------------------------

@@ -39,7 +39,8 @@
 #define MAX_PER_SLICE		64000	// 64 KB
 
 #ifdef ERTS_DIRTY_SCHEDULERS
-	#define	DIRTINESS	ERL_NIF_DIRTY_JOB_IO_BOUND
+	// #define	DIRTINESS	ERL_NIF_DIRTY_JOB_IO_BOUND
+	#define	DIRTINESS	0
 #else
 	#define	DIRTINESS	0
 #endif
@@ -62,7 +63,7 @@
 
 NIF_FUN(close,		1);
 NIF_FUN(open,		2);
-// NIF_FUN(read,		2);
+NIF_FUN(read,		2);
 // NIF_FUN(read_line,	1);
 // NIF_FUN(write,		2);
 
@@ -73,7 +74,7 @@ NIF_FUN(open,		2);
 static ErlNifFunc	nifsy_nif_funcs[] = {
 	NIF_FUNC(close,		1),
 	NIF_FUNC(open,		2),
-	// NIF_FUNC(read,		2),
+	NIF_FUNC(read,		2),
 	// NIF_FUNC(read_line,	1),
 	// NIF_FUNC(write,		2),
 };
