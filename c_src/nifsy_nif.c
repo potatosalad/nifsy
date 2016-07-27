@@ -59,10 +59,11 @@
 		int retval;						\
 		if ((retval = (UV_REQUEST)) != 0) {			\
 			(IF_ERROR);					\
-			return enif_make_tuple2(env, ATOM_error,	\
-				enif_make_string(env,			\
-					uv_strerror(retval),		\
-					ERL_NIF_LATIN1));		\
+			return enif_make_tuple2(env,ATOM_error,		\
+			enif_make_tuple2(env,				\
+			enif_make_atom(env, uv_err_name(retval)),	\
+			enif_make_string(env, uv_strerror(retval),	\
+				ERL_NIF_LATIN1)));			\
 		}							\
 	} while (0)
 
@@ -129,21 +130,21 @@
 
 typedef struct nifsy_handle_s {
 	ErlNifRWLock	*rwlock;
-	ErlNifBinary	*buffer;
-	unsigned long	buffer_alloc;
-	unsigned long	buffer_offset;
-	unsigned long	buffer_size;
+	ErlNifBinary	read_ahead;
+	unsigned long	read_ahead_bytes;
+	unsigned long	read_ahead_offset;
+	unsigned long	read_ahead_size;
 	unsigned long	read_offset;
-	int		file_descriptor;
-	int		flags;
+	int		fd;
+	int		flag;
 	int		mode;
 	bool		closed;
 	char		__padding_0[3];
 } nifsy_handle_t;
 
 typedef struct nifsy_open_options_s {
-	unsigned long	read_ahead;
-	int		flags;
+	unsigned long	read_ahead_bytes;
+	int		flag;
 	int		mode;
 	bool		lock;
 	char		__padding_0[7];
@@ -160,9 +161,15 @@ typedef struct nifsy_call_s {
 
 typedef struct nifsy_read_s {
 	ErlNifBinary	out;
-	unsigned long	obytes;
-	unsigned long	rbytes;
+	unsigned long	out_bytes;
+	unsigned long	read_bytes;
 } nifsy_read_t;
+
+// typedef struct nifsy_read_line_s {
+// 	uv_buf_t	*bufs;
+// 	unsigned long	nbufs;
+// 	unsigned long	offset;
+// } nifsy_read_line_t;
 
 /*
  * Erlang NIF functions
@@ -172,6 +179,7 @@ typedef struct nifsy_read_s {
 static void	nifsy_close_1_callback(uv_fs_t *req);
 static void	nifsy_open_2_callback(uv_fs_t *req);
 static void	nifsy_read_2_callback(uv_fs_t *req);
+// static void	nifsy_read_line_1_callback(uv_fs_t *req);
 
 /* Internal functions */
 static bool	nifsy_get_open_options(ErlNifEnv *env, ERL_NIF_TERM list, nifsy_open_options_t *options);
@@ -202,7 +210,7 @@ nifsy_close_1(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	call->data = NULL;
 
 	HANDLE_UV_ERROR_IF(uv_fs_close(ctx->loop, &(call->req),
-		handle->file_descriptor, nifsy_close_1_callback),
+		handle->fd, nifsy_close_1_callback),
 		{
 			(void) enif_free((void *)(call));
 		});
@@ -228,16 +236,14 @@ nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		|| !nifsy_get_open_options(env, argv[1], &options)
 		|| (handle = (nifsy_handle_t *)(enif_alloc_resource(ctx->resource, sizeof(nifsy_handle_t)))) == NULL);
 
-	TRACE_F("flags: %d\n", options.flags);
-
-	handle->flags = options.flags;
+	handle->rwlock = NULL;
+	handle->read_ahead_bytes = options.read_ahead_bytes;
+	handle->read_ahead_offset = 0;
+	handle->read_ahead_size = 0;
+	handle->read_offset = 0;
+	handle->flag = options.flag;
 	handle->mode = options.mode;
 	handle->closed = false;
-	handle->buffer_alloc = options.read_ahead;
-	handle->buffer_offset = 0;
-	handle->buffer_size = 0;
-	handle->read_offset = 0;
-	handle->rwlock = NULL;
 
 	if (options.lock) {
 		HANDLE_BADARG_IF((handle->rwlock = enif_rwlock_create("nifsy")) == NULL,
@@ -259,7 +265,7 @@ nifsy_open_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	call->data = NULL;
 
 	HANDLE_UV_ERROR_IF(uv_fs_open(ctx->loop, &(call->req),
-		path, handle->flags, handle->mode, nifsy_open_2_callback),
+		path, handle->flag, handle->mode, nifsy_open_2_callback),
 		{
 			(void) enif_release_resource((void *)(handle));
 			(void) enif_free((void *)(call));
@@ -275,70 +281,86 @@ nifsy_read_2(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
 	nifsy_context_t *ctx = (nifsy_context_t *)(enif_priv_data(env));
 	nifsy_handle_t *handle = NULL;
-	nifsy_read_t read_ctx;
+	unsigned long read_bytes = 0;
 	void *p = NULL;
 	nifsy_call_t *call = NULL;
+	nifsy_read_t *op = NULL;
+	ErlNifBinary *rbin = NULL;
 	uv_buf_t iov;
-
-	read_ctx.obytes = 0;
-	read_ctx.rbytes = 0;
 
 	RETURN_BADARG_IF(argc != 2
 		|| !enif_get_resource(env, argv[0], ctx->resource, (void **)(&handle))
 		|| handle->closed
-		|| !enif_get_ulong(env, argv[1], &(read_ctx.rbytes)));
+		|| !enif_get_ulong(env, argv[1], &read_bytes));
 
 	// RW_LOCK(handle);
 
-	if (handle->buffer != NULL
-			&& handle->buffer_offset != 0
-			&& handle->buffer_size > handle->buffer_offset
-			&& (handle->buffer_size - handle->buffer_offset) >= read_ctx.rbytes) {
+	if (handle->read_ahead_bytes > 0
+			&& handle->read_ahead_size > 0
+			&& handle->read_ahead_size > handle->read_ahead_offset
+			&& (handle->read_ahead_size - handle->read_ahead_offset) >= read_bytes) {
 		TRACE_F("[A] buffer exists, enough data\n");
 		ERL_NIF_TERM out;
-		unsigned char *buf = enif_make_new_binary(env, read_ctx.rbytes, &out);
-		(void) memcpy(buf, handle->buffer->data + handle->buffer_offset, read_ctx.rbytes);
-		handle->buffer_offset += read_ctx.rbytes;
+		unsigned char *obuf = enif_make_new_binary(env, read_bytes, &out);
+		unsigned char *rbuf = handle->read_ahead.data + handle->read_ahead_offset;
+		(void) memcpy(obuf, rbuf, read_bytes);
+		handle->read_ahead_offset += read_bytes;
 		return enif_make_tuple2(env, ATOM_ok, out);
 	}
 
 	HANDLE_ERROR_IF((p = enif_alloc(sizeof(nifsy_call_t) + sizeof(nifsy_read_t))) == NULL,
 		{
-			TRACE_F("p is NULL (trying to alloc %llu bytes)\n", sizeof(nifsy_call_t) + sizeof(nifsy_read_t));
-			// RW_UNLOCK(handle);
-		}, ATOM_enomem);
-
-	HANDLE_ERROR_IF(!enif_alloc_binary(read_ctx.rbytes, &(read_ctx.out)),
-		{
-			TRACE_F("can't alloc %llu bytes\n", read_ctx.rbytes);
-			(void) enif_free(p);
 			// RW_UNLOCK(handle);
 		}, ATOM_enomem);
 
 	call = (nifsy_call_t *)(p);
+	op = (nifsy_read_t *)(void *)((uint8_t *)(p) + sizeof(nifsy_call_t));
+
+	HANDLE_ERROR_IF(!enif_alloc_binary(read_bytes, &op->out),
+		{
+			(void) enif_free((void *)(call));
+			// RW_UNLOCK(handle);
+		}, ATOM_enomem);
+
+	op->out_bytes = 0;
+	op->read_bytes = read_bytes;
+
 	call->ctx = ctx;
 	call->tag = enif_make_ref(env);
 	(void) enif_self(env, &(call->pid));
 	call->handle = handle;
 	call->req.data = (void *)(call);
-	call->data = (void *)((uint8_t *)(p) + sizeof(nifsy_call_t));
+	call->data = (void *)(op);
 
-	if (handle->buffer && handle->buffer_offset != 0 && handle->buffer_size > handle->buffer_offset) {
+	if (handle->read_ahead_bytes > 0
+			&& handle->read_ahead_size > 0
+			&& handle->read_ahead_size > handle->read_ahead_offset) {
 		TRACE_F("[B] buffer exists, not enough data\n");
-		(void) memcpy(read_ctx.out.data, handle->buffer->data + handle->buffer_offset, handle->buffer_size - handle->buffer_offset);
-		read_ctx.obytes = handle->buffer_size - handle->buffer_offset;
-		handle->buffer_offset = 0;
+		unsigned char *rbuf = handle->read_ahead.data + handle->read_ahead_offset;
+		unsigned long rlen = handle->read_ahead_size - handle->read_ahead_offset;
+		(void) memcpy(op->out.data, rbuf, rlen);
+		op->out_bytes += rlen;
+		handle->read_ahead_offset = 0;
+		handle->read_ahead_size = 0;
 	}
 
-	(void) memcpy(call->data, (void *)(&read_ctx), sizeof(nifsy_read_t));
+	rbin = &op->out;
 
-	iov = uv_buf_init((char *)(handle->buffer->data), (unsigned int)(handle->buffer->size));
+	if (handle->read_ahead_bytes > 0) {
+		rbin = &handle->read_ahead;
+	}
+
+	iov = uv_buf_init((char *)(rbin->data), (unsigned int)(rbin->size));
 
 	HANDLE_UV_ERROR_IF(uv_fs_read(ctx->loop, &(call->req),
-		handle->file_descriptor, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback),
+		handle->fd, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback),
 		{
-			(void) enif_release_binary(&(read_ctx.out));
-			(void) enif_free(p);
+			handle->read_ahead_offset = 0;
+			handle->read_ahead_size = 0;
+			handle->read_offset -= op->out_bytes;
+			(void) enif_release_binary(&op->out);
+			(void) enif_free((void *)(call));
+			// RW_UNLOCK(handle);
 		});
 
 	(void) enif_cond_signal(ctx->wakeup);
@@ -356,27 +378,28 @@ static void
 nifsy_close_1_callback(uv_fs_t *req)
 {
 	nifsy_call_t *call = (nifsy_call_t *)(req->data);
-	nifsy_handle_t *handle = call->handle;
+	// nifsy_handle_t *handle = call->handle;
 	ErlNifEnv *env = NULL;
 	int retval;
 	ERL_NIF_TERM out;
 
 	TRACE_F("close/1 result: %d\n", req->result);
 
-	env = enif_alloc_env();
 	retval = (int)(req->result);
 
+	env = enif_alloc_env();
+
 	if (retval < 0) {
-		handle->file_descriptor = retval;
-		handle->buffer = NULL;
-		out = enif_make_tuple2(env, ATOM_error,
-			enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1));
+		out = enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1);
+		out = enif_make_tuple2(env, enif_make_atom(env, uv_err_name(retval)), out);
+		out = enif_make_tuple2(env, ATOM_error, out);
 	} else {
-		out = enif_make_tuple2(env, ATOM_ok,
-			enif_make_ulong(env, (unsigned long)(req->result)));
+		out = enif_make_ulong(env, (unsigned long)(req->result));
+		out = enif_make_tuple2(env, ATOM_ok, out);
 	}
 
-	(void) enif_send(NULL, &(call->pid), env, enif_make_tuple2(env, call->tag, out));
+	out = enif_make_tuple2(env, call->tag, out);
+	(void) enif_send(NULL, &(call->pid), env, out);
 
 	(void) enif_free_env(env);
 	(void) uv_fs_req_cleanup(req);
@@ -396,52 +419,55 @@ nifsy_open_2_callback(uv_fs_t *req)
 
 	TRACE_F("open/2 result: %d\n", req->result);
 
-	if (handle->flags & O_APPEND)
+	if (handle->flag & O_APPEND)
 		TRACE_F("\tO_APPEND\n");
-	if (handle->flags & O_CLOEXEC)
+	if (handle->flag & O_CLOEXEC)
 		TRACE_F("\tO_CLOEXEC\n");
-	if (handle->flags & O_CREAT)
+	if (handle->flag & O_CREAT)
 		TRACE_F("\tO_CREAT\n");
-	if (handle->flags & O_EVTONLY)
+	if (handle->flag & O_EVTONLY)
 		TRACE_F("\tO_EVTONLY\n");
-	if (handle->flags & O_EXCL)
+	if (handle->flag & O_EXCL)
 		TRACE_F("\tO_EXCL\n");
-	if (handle->flags & O_EXLOCK)
+	if (handle->flag & O_EXLOCK)
 		TRACE_F("\tO_EXLOCK\n");
-	if (handle->flags & O_NOFOLLOW)
+	if (handle->flag & O_NOFOLLOW)
 		TRACE_F("\tO_NOFOLLOW\n");
-	if (handle->flags & O_NONBLOCK)
+	if (handle->flag & O_NONBLOCK)
 		TRACE_F("\tO_NONBLOCK\n");
-	if (handle->flags & O_RDONLY)
+	if (handle->flag & O_RDONLY)
 		TRACE_F("\tO_RDONLY\n");
-	if (handle->flags & O_RDWR)
+	if (handle->flag & O_RDWR)
 		TRACE_F("\tO_RDWR\n");
-	if (handle->flags & O_SHLOCK)
+	if (handle->flag & O_SHLOCK)
 		TRACE_F("\tO_SHLOCK\n");
-	if (handle->flags & O_SYMLINK)
+	if (handle->flag & O_SYMLINK)
 		TRACE_F("\tO_SYMLINK\n");
-	if (handle->flags & O_TRUNC)
+	if (handle->flag & O_TRUNC)
 		TRACE_F("\tO_TRUNC\n");
-	if (handle->flags & O_WRONLY)
+	if (handle->flag & O_WRONLY)
 		TRACE_F("\tO_WRONLY\n");
 
-	env = enif_alloc_env();
 	retval = (int)(req->result);
+	handle->fd = retval;
+
+	env = enif_alloc_env();
 
 	if (retval < 0) {
-		handle->file_descriptor = retval;
-		handle->buffer = NULL;
-		out = enif_make_tuple2(env, ATOM_error,
-			enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1));
+		handle->read_ahead_bytes = 0;
+		out = enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1);
+		out = enif_make_tuple2(env, enif_make_atom(env, uv_err_name(retval)), out);
+		out = enif_make_tuple2(env, ATOM_error, out);
+	} else if (handle->read_ahead_bytes > 0 && !enif_alloc_binary(handle->read_ahead_bytes, &handle->read_ahead)) {
+		handle->read_ahead_bytes = 0;
+		out = enif_make_tuple2(env, ATOM_error, ATOM_enomem);
 	} else {
-		handle->file_descriptor = retval;
-		handle->buffer = enif_alloc(sizeof(ErlNifBinary));
-		(void) enif_alloc_binary(handle->buffer_alloc, handle->buffer);
-		out = enif_make_tuple2(env, ATOM_ok,
-			enif_make_resource(env, handle));
+		out = enif_make_resource(env, handle);
+		out = enif_make_tuple2(env, ATOM_ok, out);
 	}
 
-	enif_send(NULL, &(call->pid), env, enif_make_tuple2(env, call->tag, out));
+	out = enif_make_tuple2(env, call->tag, out);
+	(void) enif_send(NULL, &(call->pid), env, out);
 
 	(void) enif_release_resource((void *)(handle));
 	(void) enif_free_env(env);
@@ -456,10 +482,14 @@ nifsy_read_2_callback(uv_fs_t *req)
 {
 	nifsy_call_t *call = (nifsy_call_t *)(req->data);
 	nifsy_handle_t *handle = call->handle;
-	nifsy_read_t *read_ctx = (nifsy_read_t *)(call->data);
+	nifsy_read_t *op = (nifsy_read_t *)(call->data);
 	ErlNifEnv *env = NULL;
 	int retval;
 	ERL_NIF_TERM out;
+	unsigned char *obuf = NULL;
+	unsigned char *rbuf = NULL;
+	unsigned long rlen = 0;
+	ErlNifBinary *rbin = NULL;
 	uv_buf_t iov;
 
 	TRACE_F("read/2 result: %d\n", req->result);
@@ -467,9 +497,9 @@ nifsy_read_2_callback(uv_fs_t *req)
 	retval = (int)(req->result);
 
 	if (retval < 0) {
-		handle->buffer_offset = 0;
-		handle->buffer_size = 0;
-		handle->read_offset -= read_ctx->obytes;
+		handle->read_ahead_offset = 0;
+		handle->read_ahead_size = 0;
+		handle->read_offset -= op->out_bytes;
 
 		env = enif_alloc_env();
 		out = enif_make_string(env, uv_strerror(retval), ERL_NIF_LATIN1);
@@ -480,22 +510,26 @@ nifsy_read_2_callback(uv_fs_t *req)
 
 		(void) enif_free_env(env);
 		(void) uv_fs_req_cleanup(req);
+		(void) enif_release_binary(&op->out);
 		(void) enif_free((void *)(call));
 
 		return;
 	}
 
 	if (req->result == 0) {
-		handle->buffer_offset = 0;
-		handle->buffer_size = 0;
+		handle->read_ahead_offset = 0;
+		handle->read_ahead_size = 0;
 
 		env = enif_alloc_env();
 
-		if (read_ctx->obytes == 0) {
+		if (op->out_bytes == 0) {
+			(void) enif_release_binary(&op->out);
 			out = ATOM_eof;
 		} else {
-			out = enif_make_binary(env, &(read_ctx->out));
-			out = enif_make_sub_binary(env, out, 0, read_ctx->obytes);
+			out = enif_make_binary(env, &op->out);
+			if (op->out.size > op->out_bytes) {
+				out = enif_make_sub_binary(env, out, 0, op->out_bytes);
+			}
 			out = enif_make_tuple2(env, ATOM_ok, out);
 		}
 
@@ -509,15 +543,17 @@ nifsy_read_2_callback(uv_fs_t *req)
 		return;
 	}
 
-	if ((read_ctx->obytes + req->result) >= read_ctx->rbytes) {
-		handle->buffer_offset = read_ctx->rbytes - read_ctx->obytes;
-		handle->buffer_size = req->result;
-		handle->read_offset += req->result;
-		(void) memcpy(read_ctx->out.data + read_ctx->obytes, handle->buffer->data, handle->buffer_offset);
-		read_ctx->obytes += handle->buffer_offset;
+	rlen = (unsigned long)(req->result);
+	handle->read_offset += rlen;
+
+	if (handle->read_ahead_bytes == 0) {
+		op->out_bytes += rlen;
 
 		env = enif_alloc_env();
-		out = enif_make_binary(env, &(read_ctx->out));
+		out = enif_make_binary(env, &op->out);
+		if (op->out.size > op->out_bytes) {
+			out = enif_make_sub_binary(env, out, 0, op->out_bytes);
+		}
 		out = enif_make_tuple2(env, ATOM_ok, out);
 		out = enif_make_tuple2(env, call->tag, out);
 		(void) enif_send(NULL, &(call->pid), env, out);
@@ -529,16 +565,43 @@ nifsy_read_2_callback(uv_fs_t *req)
 		return;
 	}
 
-	(void) memcpy(read_ctx->out.data + read_ctx->obytes, handle->buffer->data, req->result);
-	handle->buffer_offset = 0;
-	handle->buffer_size = req->result;
-	handle->read_offset += req->result;
-	read_ctx->obytes += req->result;
+	obuf = op->out.data + op->out_bytes;
+	rbuf = handle->read_ahead.data;
 
-	iov = uv_buf_init((char *)(handle->buffer->data), (unsigned int)(handle->buffer->size));
+	handle->read_ahead_offset = 0;
+	handle->read_ahead_size = rlen;
+
+	if ((op->out_bytes + rlen) >= op->read_bytes) {
+		rlen = op->read_bytes - op->out_bytes;
+		handle->read_ahead_offset += rlen;
+		(void) memcpy(obuf, rbuf, rlen);
+		op->out_bytes += rlen;
+
+		env = enif_alloc_env();
+		out = enif_make_binary(env, &op->out);
+		if (op->out.size > op->out_bytes) {
+			out = enif_make_sub_binary(env, out, 0, op->out_bytes);
+		}
+		out = enif_make_tuple2(env, ATOM_ok, out);
+		out = enif_make_tuple2(env, call->tag, out);
+		(void) enif_send(NULL, &(call->pid), env, out);
+
+		(void) enif_free_env(env);
+		(void) uv_fs_req_cleanup(req);
+		(void) enif_free((void *)(call));
+
+		return;
+	}
+
+	(void) memcpy(obuf, rbuf, rlen);
+	op->out_bytes += rlen;
+
 	(void) uv_fs_req_cleanup(req);
+
+	rbin = &handle->read_ahead;
+	iov = uv_buf_init((char *)(rbin->data), (unsigned int)(rbin->size));
 	// TODO: handle errors on read
-	(void) uv_fs_read(call->ctx->loop, &(call->req), handle->file_descriptor, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback);
+	(void) uv_fs_read(call->ctx->loop, &(call->req), handle->fd, &iov, 1, (int64_t)(handle->read_offset), nifsy_read_2_callback);
 
 	return;
 }
@@ -559,73 +622,73 @@ nifsy_get_open_options(ErlNifEnv *env, ERL_NIF_TERM list, nifsy_open_options_t *
 		return false;
 	}
 
-	options->flags = 0;
+	options->flag = 0;
 	options->mode = 0;
 	options->lock = false;
-	options->read_ahead = 0;
+	options->read_ahead_bytes = 0;
 
 	while (enif_get_list_cell(env, list, &head, &list)) {
 		if (enif_is_identical(head, ATOM_read_ahead)) {
-			options->read_ahead = 0x4000000UL;
+			options->read_ahead_bytes = 0x4000000UL;
 #ifdef O_APPEND
 		} else if (enif_is_identical(head, ATOM_append)) {
-			options->flags |= O_APPEND;
+			options->flag |= O_APPEND;
 #endif
 #ifdef O_CLOEXEC
 		} else if (enif_is_identical(head, ATOM_cloexec)) {
-			options->flags |= O_CLOEXEC;
+			options->flag |= O_CLOEXEC;
 #endif
 #ifdef O_CREAT
 		} else if (enif_is_identical(head, ATOM_creat)) {
-			options->flags |= O_CREAT;
+			options->flag |= O_CREAT;
 #endif
 #ifdef O_EVTONLY
 		} else if (enif_is_identical(head, ATOM_evtonly)) {
-			options->flags |= O_EVTONLY;
+			options->flag |= O_EVTONLY;
 #endif
 #ifdef O_EXCL
 		} else if (enif_is_identical(head, ATOM_excl)) {
-			options->flags |= O_EXCL;
+			options->flag |= O_EXCL;
 #endif
 #ifdef O_EXLOCK
 		} else if (enif_is_identical(head, ATOM_exlock)) {
-			options->flags |= O_EXLOCK;
+			options->flag |= O_EXLOCK;
 #endif
 #ifdef O_NOFOLLOW
 		} else if (enif_is_identical(head, ATOM_nofollow)) {
-			options->flags |= O_NOFOLLOW;
+			options->flag |= O_NOFOLLOW;
 #endif
 #ifdef O_NONBLOCK
 		} else if (enif_is_identical(head, ATOM_nonblock)) {
-			options->flags |= O_NONBLOCK;
+			options->flag |= O_NONBLOCK;
 #endif
 #ifdef O_RDONLY
 		} else if (enif_is_identical(head, ATOM_rdonly)) {
-			options->flags |= O_RDONLY;
+			options->flag |= O_RDONLY;
 #endif
 #ifdef O_RDWR
 		} else if (enif_is_identical(head, ATOM_rdwr)) {
-			options->flags |= O_RDWR;
+			options->flag |= O_RDWR;
 #endif
 #ifdef O_SHLOCK
 		} else if (enif_is_identical(head, ATOM_shlock)) {
-			options->flags |= O_SHLOCK;
+			options->flag |= O_SHLOCK;
 #endif
 #ifdef O_SYMLINK
 		} else if (enif_is_identical(head, ATOM_symlink)) {
-			options->flags |= O_SYMLINK;
+			options->flag |= O_SYMLINK;
 #endif
 #ifdef O_TRUNC
 		} else if (enif_is_identical(head, ATOM_trunc)) {
-			options->flags |= O_TRUNC;
+			options->flag |= O_TRUNC;
 #endif
 #ifdef O_WRONLY
 		} else if (enif_is_identical(head, ATOM_wronly)) {
-			options->flags |= O_WRONLY;
+			options->flag |= O_WRONLY;
 #endif
 		} else if (enif_get_tuple(env, head, &arity, &elements) && arity == 2 && enif_is_atom(env, elements[0])) {
 			if (enif_is_identical(elements[0], ATOM_read_ahead) && enif_get_ulong(env, elements[1], &value)) {
-				options->read_ahead = value;
+				options->read_ahead_bytes = value;
 			} else {
 				return false;
 			}
@@ -658,12 +721,12 @@ nifsy_do_close(nifsy_handle_t *handle, bool from_dtor)
 {
 	if (from_dtor) {
 		int result = 0;
-		if (handle->file_descriptor >= 0) {
-			result = close(handle->file_descriptor);
+		if (handle->fd >= 0) {
+			result = close(handle->fd);
 		}
-		if (handle->buffer) {
-			(void) enif_release_binary(handle->buffer);
-			handle->buffer = NULL;
+		if (handle->read_ahead_bytes > 0) {
+			(void) enif_release_binary(&handle->read_ahead);
+			handle->read_ahead_bytes = 0;
 		}
 		return result;
 	} else {
