@@ -6,6 +6,8 @@
 -export([close/1]).
 -export([open/2]).
 -export([read/2]).
+-export([read_line/1]).
+-export([system_info/0]).
 
 %% Macros
 -define(call(Request),
@@ -14,6 +16,10 @@
 			receive
 				{Tag, Reply} ->
 					Reply
+			after
+				5000 ->
+					io:format("Failed to receive ~p reply from: ~s~n", [Tag, ??Request]),
+					{error, timeout}
 			end;
 		Reply ->
 			Reply
@@ -31,3 +37,20 @@ open(Path, Options) ->
 
 read(IoDevice, Bytes) ->
 	?call(nifsy_nif:read(IoDevice, Bytes)).
+
+read_line(IoDevice) ->
+	case ?call(nifsy_nif:read_line(IoDevice)) of
+		{error, timeout} ->
+			io:format("read/2 attempt: ~p~n", [case read(IoDevice, 1024) of
+				{ok, B} ->
+					byte_size(B);
+				E ->
+					E
+			end]),
+			{error, timeout};
+		Other ->
+			Other
+	end.
+
+system_info() ->
+	nifsy_nif:system_info().

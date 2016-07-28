@@ -64,7 +64,8 @@
 NIF_FUN(close,		1);
 NIF_FUN(open,		2);
 NIF_FUN(read,		2);
-// NIF_FUN(read_line,	1);
+NIF_FUN(read_line,	1);
+NIF_FUN(system_info,	0);
 // NIF_FUN(write,		2);
 
 #undef NIF_FUN
@@ -75,7 +76,8 @@ static ErlNifFunc	nifsy_nif_funcs[] = {
 	NIF_FUNC(close,		1),
 	NIF_FUNC(open,		2),
 	NIF_FUNC(read,		2),
-	// NIF_FUNC(read_line,	1),
+	NIF_FUNC(read_line,	1),
+	NIF_FUNC(system_info,	0),
 	// NIF_FUNC(write,		2),
 };
 
@@ -100,7 +102,9 @@ static ErlNifFunc	nifsy_nif_funcs[] = {
 	ATOM(excl);
 	ATOM(exlock);
 	ATOM(exclusive);
+	ATOM(idle);
 	ATOM(lock);
+	ATOM(loop_wait);
 	ATOM(nofollow);
 	ATOM(nonblock);
 	ATOM(ok);
@@ -113,6 +117,7 @@ static ErlNifFunc	nifsy_nif_funcs[] = {
 	ATOM(sync);
 	ATOM(trunc);
 	ATOM(truncate);
+	ATOM(wake);
 	ATOM(write);
 	ATOM(wronly);
 #undef ATOM
@@ -120,14 +125,17 @@ static ErlNifFunc	nifsy_nif_funcs[] = {
 typedef struct nifsy_context_0_s {
 	uint8_t			version;
 	char			__padding_0[7];
-	ErlNifResourceType	*resource;
-	ErlNifMutex		*mutex;
-	ErlNifCond		*wakeup;
-	ErlNifTid		*tid;
-	ErlNifTid		__tid;
+	ErlNifResourceType	*file_type;
+	ErlNifMutex		*wake_mutex;
+	ErlNifCond		*wake_cond;
 	uv_loop_t		*loop;
-	bool			stop;
+	ErlNifTid		*loop_tid;
+	uv_idle_t		idle;
+	bool			loop_alive;
+	bool			loop_stop;
 	char			__padding_1[7];
+	uint64_t		idles;
+	uint64_t		wakes;
 } nifsy_context_0_t;
 
 #define nifsy_context_version	0

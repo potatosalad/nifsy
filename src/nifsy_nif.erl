@@ -6,6 +6,8 @@
 -export([close/1]).
 -export([open/2]).
 -export([read/2]).
+-export([read_line/1]).
+-export([system_info/0]).
 
 -on_load(init/0).
 
@@ -20,6 +22,12 @@ open(_Path, _Options) ->
 	erlang:nif_error({nif_not_loaded, ?MODULE}).
 
 read(_IoDevice, _Bytes) ->
+	erlang:nif_error({nif_not_loaded, ?MODULE}).
+
+read_line(_IoDevice) ->
+	erlang:nif_error({nif_not_loaded, ?MODULE}).
+
+system_info() ->
 	erlang:nif_error({nif_not_loaded, ?MODULE}).
 
 %%%-------------------------------------------------------------------
